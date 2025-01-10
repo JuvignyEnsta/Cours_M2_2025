@@ -1,0 +1,10 @@
+Nombre de valeurs locales : 8000000`
+Valeurs initiales : [-27199 -31675 -24063 ... -29627  32520  29834]
+iter 0
+iter 1
+iter 2
+iter 3
+Temps local pour le tri : 0.9253973960876465 secondes
+Première valeurs locale : -32768
+Dernière valeurs locale : -16387
+values : [-32768 -32768 -32768 ... -16387 -16387 -16387]
