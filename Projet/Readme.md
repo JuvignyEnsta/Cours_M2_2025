@@ -4,7 +4,7 @@ Ce projet a été inspiré par le rapport d'un projet fait en science de l'ingé
 
 Vous pourrez trouver le travail original sur :
 
-https://eduscol.education.fr/sti/si-ens-paris-saclay/ressources_pedagogiques/simulation-dela-propagation-dun-feu-de-foret#description
+<https://eduscol.education.fr/sti/si-ens-paris-saclay/ressources_pedagogiques/simulation-dela-propagation-dun-feu-de-foret#description>
 
 ## Présentation du projet
 
