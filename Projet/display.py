@@ -19,7 +19,7 @@ class DisplayFire:
         if self.pixels is None :
             self.pixels = pg.surfarray.pixels2d(self.screen)
         color_map = np.empty(shape=(self.width, self.height), dtype=np.uint32)
-        color_map[:,:] = 65536*fire_map[:,:] + 256 * vegetation_map[:,:]
+        color_map[:,:] = 65536*np.int32(fire_map[:,:]) + 256 * np.int32(vegetation_map[:,:])
         self.pixels[:,:] = color_map[:,:]
         pg.display.update()
 
