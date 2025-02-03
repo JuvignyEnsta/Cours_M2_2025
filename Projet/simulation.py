@@ -120,10 +120,10 @@ def check_params( params : map ) -> bool :
 
 def display_params(params : map ):
     print("Parametres definis pour la simulation : ")
-    print(f"\tTaille du terrain                : {params["longueur"]}")
-    print(f"\tNombre de cellules par direction : {params["discretisation"]}")
-    print(f"\tVecteur vitesse vent             : {params["vent"]}")
-    print(f"\tPosition initiale du foyer       : {params["debut_feu"]}")
+    print(f"\tTaille du terrain                : {params['longueur']}")
+    print(f"\tNombre de cellules par direction : {params['discretisation']}")
+    print(f"\tVecteur vitesse vent             : {params['vent']}")
+    print(f"\tPosition initiale du foyer       : {params['debut_feu']}")
 
 params = {
     "longueur"       : 1.,
