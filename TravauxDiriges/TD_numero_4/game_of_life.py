@@ -23,6 +23,13 @@ On itère ensuite pour étudier la façon dont évolue la population des cellule
 """
 import pygame  as pg
 import numpy   as np
+from mpi4py import MPI
+
+globCom = MPI.COMM_WORLD.Dup()
+rank = globCom.Get_rank()
+size = globCom.Get_size()
+newCom = globCom.Split(rank  == 0, rank)
+print(f"globCom.rank : {globCom.rank}, newCom.rank : {newCom.rank}, newCom.size : {newCom.size}")
 
 
 class Grille:
@@ -37,18 +44,31 @@ class Grille:
     Exemple :
        grid = Grille( (10,10), init_pattern=[(2,2),(0,2),(4,2),(2,0),(2,4)], color_life=pg.Color("red"), color_dead=pg.Color("black"))
     """
-    def __init__(self, dim, init_pattern=None, color_life=pg.Color("black"), color_dead=pg.Color("white")):
+    def __init__(self, rank : int, size : int, dim_glob, init_pattern=None,
+                 color_life=pg.Color("black"), color_dead=pg.Color("white")):
         import random
-        self.dimensions = dim
+        nx = dim_glob[0]//size + (1 if rank < dim_glob[0]%size else 0) + 2
+        ny = dim_glob[1]
+        self.dimensions_locale = (nx, ny)
+        start_i = rank * (nx-2) + (dim_glob[0]%size if rank >= dim_glob[0]%size else 0)
         if init_pattern is not None:
-            self.cells = np.zeros(self.dimensions, dtype=np.uint8)
-            indices_i = [v[0] for v in init_pattern]
+            self.cells = np.zeros(self.dimensions_locale, dtype=np.uint8)
+            indices_i = [v[0]+1 for v in init_pattern if v[0] >= start_i and v[0] < start_i+nx]
             indices_j = [v[1] for v in init_pattern]
-            self.cells[indices_i,indices_j] = 1
-        else:
-            self.cells = np.random.randint(2, size=dim, dtype=np.uint8)
+            if len(indices_i) > 0:
+                self.cells[indices_i,indices_j] = 1
         self.col_life = color_life
         self.col_dead = color_dead
+
+    def maj_ghostcell(self):
+        # Préparation des réceptions :
+        req1 = newCom.Irecv(self.cells[0,:], source = (newCom.size+newCom.rank-1)%newCom.size, tag = 100)
+        req2 = newCom.Irecv(self.cells[-1,:], source = (newCom.rank+1)%newCom.size, tag = 101)
+        # Envoie des cellules pour ghostcells :
+        newCom.Send(self.cells[1,:], dest = (newCom.size+newCom.rank-1)%newCom.size, tag = 101)
+        newCom.Send(self.cells[-2,:], dest = (newCom.rank+1)%newCom.size, tag = 100)
+        req1.wait()
+        req2.wait()
 
     def compute_next_iteration(self):
         """
@@ -70,15 +90,15 @@ class App:
     def __init__(self, geometry, grid):
         self.grid = grid
         # Calcul de la taille d'une cellule par rapport à la taille de la fenêtre et de la grille à afficher :
-        self.size_x = geometry[1]//grid.dimensions[1]
-        self.size_y = geometry[0]//grid.dimensions[0]
+        self.size_x = geometry[1]//grid.dimensions_locale[1]
+        self.size_y = geometry[0]//grid.dimensions_locale[0]
         if self.size_x > 4 and self.size_y > 4 :
             self.draw_color=pg.Color('lightgrey')
         else:
             self.draw_color=None
         # Ajustement de la taille de la fenêtre pour bien fitter la dimension de la grille
-        self.width = grid.dimensions[1] * self.size_x
-        self.height= grid.dimensions[0] * self.size_y
+        self.width = grid.dimensions_locale[1] * self.size_x
+        self.height= grid.dimensions_locale[0] * self.size_y
         # Création de la fenêtre à l'aide de tkinter
         self.screen = pg.display.set_mode((self.width,self.height))
         #
@@ -86,21 +106,21 @@ class App:
         self.colors = np.array([self.grid.col_dead[:-1], self.grid.col_life[:-1]])
 
     def draw(self):
-        surface = pg.surfarray.make_surface(self.colors[self.grid.cells.T])
-        surface = pg.transform.flip(surface, False, True)
-        surface = pg.transform.scale(surface, (self.width, self.height))
-        self.screen.blit(surface, (0,0))
+        self.surface = pg.surfarray.make_surface(self.colors[self.grid.cells[1:-1,:].T])
+        self.surface = pg.transform.flip(self.surface, False, True)
+        self.surface = pg.transform.scale(self.surface, (self.width, self.height))
+        self.screen.blit(self.surface, (0,0))
         if (self.draw_color is not None):
-            [pg.draw.line(self.screen, self.draw_color, (0,i*self.size_y), (self.width,i*self.size_y)) for i in range(self.grid.dimensions[0])]
-            [pg.draw.line(self.screen, self.draw_color, (j*self.size_x,0), (j*self.size_x,self.height)) for j in range(self.grid.dimensions[1])]
+            [pg.draw.line(self.screen, self.draw_color, (0,i*self.size_y), (self.width,i*self.size_y)) for i in range(self.grid.dimensions_locale[0])]
+            [pg.draw.line(self.screen, self.draw_color, (j*self.size_x,0), (j*self.size_x,self.height)) for j in range(self.grid.dimensions_locale[1])]
         pg.display.update()
+
 
 
 if __name__ == '__main__':
     import time
     import sys
 
-    pg.init()
     dico_patterns = { # Dimension et pattern dans un tuple
         'blinker' : ((5,5),[(2,1),(2,2),(2,3)]),
         'toad'    : ((6,6),[(2,2),(2,3),(2,4),(3,3),(3,4),(3,5)]),
@@ -132,20 +152,42 @@ if __name__ == '__main__':
     except KeyError:
         print("No such pattern. Available ones are:", dico_patterns.keys())
         exit(1)
-    grid = Grille(*init_pattern)
-    appli = App((resx, resy), grid)
+    
+    if rank != 0:
+        # Initialiser qu'une partie de la grille selon mon numéro de processus dans newCom
+        grid = Grille(newCom.rank, newCom.size, *init_pattern)
+        grid.maj_ghostcell()
+        grid_glob = None
+        if newCom.rank == 0:
+            grid_glob = np.zeros(init_pattern[0], dtype=np.uint8)
+        sendcounts = np.array(newCom.gather(grid.cells[1:-1,:].size, root=0))
+        loop = True
+        while loop:
+            #time.sleep(0.1) # A régler ou commenter pour vitesse maxi
+            t1 = time.time()
+            diff = grid.compute_next_iteration()
+            grid.maj_ghostcell()
+            t2 = time.time()
+            newCom.Gatherv(grid.cells[1:-1,:], [grid_glob, sendcounts], root = 0)
+            if newCom.rank == 0:
+                globCom.send(grid_glob, dest = 0)
+            print(f"Temps calcul prochaine generation : {t2-t1:2.2e} secondes", end='\n', flush=True)
+    else:
+        pg.init()
+        grid = Grille(newCom.rank, newCom.size, *init_pattern)
+        appli = App((resx, resy), grid)
 
-    loop = True
-    while loop:
-        #time.sleep(0.1) # A régler ou commenter pour vitesse maxi
-        t1 = time.time()
-        diff = grid.compute_next_iteration()
-        t2 = time.time()
-        appli.draw()
-        t3 = time.time()
-        for event in pg.event.get():
-            if event.type == pg.QUIT:
-                loop = False
-        print(f"Temps calcul prochaine generation : {t2-t1:2.2e} secondes, temps affichage : {t3-t2:2.2e} secondes\r", end='')
+        loop = True
+        while loop:
+            #time.sleep(0.1) # A régler ou commenter pour vitesse maxi
+            appli.grid.cells[1:-1,: ] = globCom.recv(source = 1)
+            t2 = time.time()
+            appli.draw()
+            t3 = time.time()
+            for event in pg.event.get():
+                if event.type == pg.QUIT:
+                    loop = False
+            print(f"temps affichage : {t3-t2:2.2e} secondes\r", end='\n', flush=True)
+        globCom.Abort()
+        pg.quit()
 
-pg.quit()
